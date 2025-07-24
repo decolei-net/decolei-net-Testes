@@ -1,58 +1,45 @@
-﻿using Microsoft.AspNetCore.Hosting;
+﻿using Decolei.net.Data;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Decolei.net.Data; // Verifique se o namespace está correto
+using Microsoft.Extensions.Hosting;
+using System;
 using System.Linq;
 
-namespace DecolaNet.Tests;
-
-// CustomWebApplicationFactory é uma classe que estende WebApplicationFactory, e que tem como parametro Tprogram. Isso é basicamente uma classe para testar o aplicativo, 
-public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProgram> where TProgram : class
+namespace Decolei.net.Tests
 {
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProgram> where TProgram : class
     {
-        builder.UseEnvironment("Testing");
-        builder.ConfigureServices(services =>
+        // Armazena um nome de banco de dados único para o factory.
+        // Isso é muito importante pra garantir o isolamento quando os testes rodam em paralelo.
+        private readonly string _dbName = Guid.NewGuid().ToString();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-
-
-            // ===================================================================
-            // INÍCIO DA CORREÇÃO FINAL (LIMPEZA COMPLETA)
-            // ===================================================================
-
-            // Encontra e remove TODOS os serviços relacionados ao DbContext.
-            // Esta é a forma mais robusta de garantir que nenhum vestígio do SQL Server permaneça.
-            var dbContextDescriptors = services.Where(
-                d => d.ServiceType == typeof(DbContextOptions<DecoleiDbContext>) ||
-                     d.ServiceType == typeof(DecoleiDbContext)).ToList();
-
-            foreach (var descriptor in dbContextDescriptors)
+            builder.ConfigureServices(services =>
             {
-                services.Remove(descriptor);
-            }
+                var descriptorsToRemove = services
+                    .Where(d =>
+                        (d.ServiceType.Name.Contains("DbContext") ||
+                         d.ServiceType.Name.StartsWith("IDbContext") ||
+                         d.ServiceType.Name.StartsWith("DbContextOptions")) ||
+                        (d.ImplementationType != null &&
+                            (d.ImplementationType.Namespace?.Contains("EntityFrameworkCore.SqlServer") == true ||
+                             d.ServiceType.Namespace?.Contains("EntityFrameworkCore.SqlServer") == true))
+                    )
+                    .ToList();
 
-            // ===================================================================
-            // FIM DA CORREÇÃO
-            // ===================================================================
+                foreach (var descriptor in descriptorsToRemove)
+                {
+                    services.Remove(descriptor);
+                }
 
-            // Adicionar o DbContext novamente, mas agora 100% configurado para usar o banco em memória.
-            services.AddDbContext<DecoleiDbContext>(options =>
-            {
-                options.UseInMemoryDatabase("InMemoryDbForTesting");
+                services.AddDbContext<DecoleiDbContext>(options =>
+                {
+                    options.UseInMemoryDatabase(_dbName);
+                });
             });
-
-            // Construir o provedor de serviços e preparar o banco de dados.
-            var sp = services.BuildServiceProvider();
-            using (var scope = sp.CreateScope())
-            {
-                var scopedServices = scope.ServiceProvider;
-                var db = scopedServices.GetRequiredService<DecoleiDbContext>();
-
-                // Garante que o banco está limpo e recriado para cada teste
-                db.Database.EnsureDeleted();
-                db.Database.EnsureCreated();
-            }
-        });
+        }
     }
 }
