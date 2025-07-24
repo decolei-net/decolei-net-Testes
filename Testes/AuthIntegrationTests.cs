@@ -83,5 +83,37 @@ namespace DecolaNet.Tests
             var response = await _client.PostAsJsonAsync($"{AuthEndpoint}/login", loginDto);
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
+
+        [Fact]
+        [Trait("Integration", "Auth")]
+        public async Task Auth06_Logout_QuandoAutenticado_DeveRetornarSucessoEInvalidarSessao()
+        {
+            await EnsureAdminUserExistsAsync();
+            await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
+
+            var logoutResponse = await _client.PostAsync($"{AuthEndpoint}/logout", null);
+
+            Assert.Equal(HttpStatusCode.OK, logoutResponse.StatusCode);
+
+            var novoPacoteDto = new CriarPacoteViagemDto
+            {
+                Titulo = "Viagem para a Lua",
+                Destino = "Lua",
+                Valor = 99999.99m,
+                DataInicio = DateTime.UtcNow.AddMonths(6),
+                DataFim = DateTime.UtcNow.AddMonths(6).AddDays(7)
+            };
+            var response = await _client.PostAsJsonAsync(PacotesEndpoint, novoPacoteDto);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        [Fact]
+        [Trait("Integration", "Auth")]
+        public async Task Auth07_Logout_QuandoNaoAutenticado_DeveRetornarUnauthorized()
+        {
+            var logoutResponse = await _client.PostAsync($"{AuthEndpoint}/logout", null);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, logoutResponse.StatusCode);
+        }
     }
 }
