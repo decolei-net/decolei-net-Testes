@@ -106,5 +106,24 @@ namespace DecolaNet.Tests
             var user = await dbContext.Users.SingleOrDefaultAsync(u => u.Email == userDto.Email);
             Assert.NotNull(user);
         }
+
+        protected async Task<int> CreateAndGetPackageIdAsync(CriarPacoteViagemDto dto)
+        {
+            await EnsureAdminUserExistsAsync();
+            await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
+
+            var response = await _client.PostAsJsonAsync(PacotesEndpoint, dto);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return body.GetProperty("id").GetInt32();
+        }
+
+        protected async Task<List<JsonElement>> ExtractListFromResponse(HttpResponseMessage response)
+        {
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(JsonValueKind.Array, json.ValueKind);
+            return json.EnumerateArray().ToList();
+        }
     }
 }
