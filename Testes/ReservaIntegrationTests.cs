@@ -1,5 +1,4 @@
-﻿using DecolaNet.Tests;
-using Decolei.net.DTOs;
+﻿using Decolei.net.DTOs;
 using Decolei.net.Tests;
 using System.Net;
 using System.Net.Http.Json;
