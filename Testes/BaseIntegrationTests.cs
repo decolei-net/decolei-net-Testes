@@ -107,6 +107,14 @@ namespace DecolaNet.Tests
             Assert.NotNull(user);
         }
 
+        protected async Task<int?> GetUserIdByEmail(string email)
+        {
+            using var scope = _factory.Server.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<DecoleiDbContext>();
+            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Email == email);
+            return user?.Id;
+        }
+
         protected async Task<int> CreateAndGetPackageIdAsync(CriarPacoteViagemDto dto)
         {
             await EnsureAdminUserExistsAsync();
