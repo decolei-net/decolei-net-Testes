@@ -12,7 +12,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace DecolaNet.Tests
+namespace Decolei.net.Tests.Testes
 {
     public abstract class BaseIntegrationTests : IDisposable
     {
@@ -145,6 +145,18 @@ namespace DecolaNet.Tests
 
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             return body.GetProperty("id").GetInt32();
+        }
+
+        protected async Task<string?> GeneratePasswordResetTokenForUserAsync(string email)
+        {
+            using var scope = _factory.Server.Services.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<Usuario>>();
+            var user = await userManager.FindByEmailAsync(email);
+            if (user == null)
+            {
+                return null;
+            }
+            return await userManager.GeneratePasswordResetTokenAsync(user);
         }
     }
 }
