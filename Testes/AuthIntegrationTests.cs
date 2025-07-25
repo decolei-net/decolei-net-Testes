@@ -6,7 +6,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Xunit;
 
-namespace DecolaNet.Tests
+namespace Decolei.net.Tests.Testes
 {
     public class AuthIntegrationTests : BaseIntegrationTests
     {
@@ -214,34 +214,83 @@ namespace DecolaNet.Tests
 
         [Fact]
         [Trait("Integration", "Auth - Logout")]
-        public async Task Auth13_Logout_QuandoAutenticado_DeveRetornarSucessoEInvalidarSessao()
+        public async Task Auth13_Logout_QuandoAutenticado_DeveRetornarSucesso()
         {
             await EnsureAdminUserExistsAsync();
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
 
             var logoutResponse = await _client.PostAsync($"{AuthEndpoint}/logout", null);
 
-            Assert.Equal(HttpStatusCode.OK, logoutResponse.StatusCode);
-
-            var novoPacoteDto = new CriarPacoteViagemDto
-            {
-                Titulo = "Viagem para a Lua",
-                Destino = "Lua",
-                Valor = 99999.99m,
-                DataInicio = DateTime.UtcNow.AddMonths(6),
-                DataFim = DateTime.UtcNow.AddMonths(6).AddDays(7)
-            };
-            var response = await _client.PostAsJsonAsync(PacotesEndpoint, novoPacoteDto);
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            logoutResponse.EnsureSuccessStatusCode();
+            var body = await logoutResponse.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Logout realizado com sucesso!", body.GetProperty("mensagem").GetString());
         }
 
         [Fact]
         [Trait("Integration", "Auth - Logout")]
-        public async Task Auth14_Logout_QuandoNaoAutenticado_DeveRetornarUnauthorized()
+        public async Task Auth14_TentarAcessarEndpointProtegido_SemToken_DeveFalhar()
         {
-            var logoutResponse = await _client.PostAsync($"{AuthEndpoint}/logout", null);
+            _client.DefaultRequestHeaders.Authorization = null;
 
+            var response = await _client.GetAsync(AuthEndpoint);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        [Trait("Integration", "Auth - Logout")]
+        public async Task Auth15_TentarLogout_QuandoNaoAutenticado_DeveRetornarUnauthorized()
+        {
+            _client.DefaultRequestHeaders.Authorization = null;
+            var logoutResponse = await _client.PostAsync($"{AuthEndpoint}/logout", null);
             Assert.Equal(HttpStatusCode.Unauthorized, logoutResponse.StatusCode);
+        }
+
+        [Fact]
+        [Trait("Integration", "Auth - Recuperação de Senha")]
+        public async Task Auth16_RecuperarSenha_ParaUsuarioInexistente_DeveRetornarOk()
+        {
+            var response = await _client.PostAsJsonAsync($"{AuthEndpoint}/recuperar-senha", new RecuperarSenhaDto { Email = "fantasma@teste.com" });
+
+            response.EnsureSuccessStatusCode();
+        }
+
+        [Fact]
+        [Trait("Integration", "Auth - Recuperação de Senha")]
+        public async Task Auth17_RedefinirSenha_ComTokenValido_DevePermitirLoginComNovaSenha()
+        {
+            var oldPassword = "SenhaAntiga123";
+            var newPassword = "SenhaNova456!";
+            var clienteDto = new RegistroUsuarioDto { Nome = "Muda Senha", Email = "mudasenha@teste.com", Senha = oldPassword, Documento = "2222", Telefone = "2222" };
+            await RegisterAndConfirmUserAsync(clienteDto);
+
+            var token = await GeneratePasswordResetTokenForUserAsync(clienteDto.Email);
+            Assert.NotNull(token);
+
+            var redefinirDto = new RedefinirSenhaDto { Email = clienteDto.Email, Token = token!, NovaSenha = newPassword };
+            var responseRedefinir = await _client.PostAsJsonAsync($"{AuthEndpoint}/redefinir-senha", redefinirDto);
+            responseRedefinir.EnsureSuccessStatusCode();
+
+            var loginDtoNovo = new LoginUsuarioDto { Email = clienteDto.Email, Senha = newPassword };
+            var responseLoginNovo = await _client.PostAsJsonAsync($"{AuthEndpoint}/login", loginDtoNovo);
+            responseLoginNovo.EnsureSuccessStatusCode();
+
+            var loginDtoAntigo = new LoginUsuarioDto { Email = clienteDto.Email, Senha = oldPassword };
+            var responseLoginAntigo = await _client.PostAsJsonAsync($"{AuthEndpoint}/login", loginDtoAntigo);
+            Assert.Equal(HttpStatusCode.Unauthorized, responseLoginAntigo.StatusCode);
+        }
+
+        [Fact]
+        [Trait("Integration", "Auth - Recuperação de Senha")]
+        public async Task Auth18_RedefinirSenha_ComTokenInvalido_DeveFalhar()
+        {
+            var clienteDto = new RegistroUsuarioDto { Nome = "Token Ruim", Email = "tokenruim@teste.com", Senha = "senha123", Documento = "3333", Telefone = "3333" };
+            await RegisterAndConfirmUserAsync(clienteDto);
+
+            var redefinirDto = new RedefinirSenhaDto { Email = clienteDto.Email, Token = "TOKEN_FALSO_E_INVALIDO", NovaSenha = "novaSenha123" };
+            var response = await _client.PostAsJsonAsync($"{AuthEndpoint}/redefinir-senha", redefinirDto);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
     }
 }
