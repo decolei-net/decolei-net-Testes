@@ -133,5 +133,18 @@ namespace DecolaNet.Tests
             Assert.Equal(JsonValueKind.Array, json.ValueKind);
             return json.EnumerateArray().ToList();
         }
+
+        protected async Task<int> CreatePackageAndGetIdAsync(CriarPacoteViagemDto dto)
+        {
+            // Este método precisa estar logado como admin para criar o pacote
+            await EnsureAdminUserExistsAsync();
+            await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
+
+            var response = await _client.PostAsJsonAsync(PacotesEndpoint, dto);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return body.GetProperty("id").GetInt32();
+        }
     }
 }
