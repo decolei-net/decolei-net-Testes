@@ -224,7 +224,15 @@ namespace Decolei.net.Tests.Testes
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<DecoleiDbContext>();
                 var reserva = await dbContext.Reservas.FindAsync(reservaId);
-                reserva.Status = "CONFIRMADO";
+
+                // ===================================================================
+                // A CORREÇÃO ESTÁ AQUI
+                // ===================================================================
+                // O status foi alterado para "CONFIRMADA" (com A no final), para que
+                // `reserva.Status.ToLower()` resulte em "confirmada" e passe na validação do controller.
+                reserva.Status = "CONFIRMADA";
+                // ===================================================================
+
                 await dbContext.SaveChangesAsync();
             }
 
