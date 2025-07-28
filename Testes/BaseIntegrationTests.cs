@@ -1,13 +1,18 @@
-﻿using Decolei.net.Data;
+﻿using Azure;
+using Decolei.net.Data;
 using Decolei.net.DTOs;
 using Decolei.net.Models;
+using Decolei.net.Services;
 using Decolei.net.Tests;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Xunit;
@@ -157,6 +162,73 @@ namespace Decolei.net.Tests.Testes
                 return null;
             }
             return await userManager.GeneratePasswordResetTokenAsync(user);
+        }
+
+        protected async Task<(int reservaId, decimal valorPacote, string userEmail, string userPassword)> CreatePackageAndReservationAsync()
+        {
+            var valorPacote = 150.75m;
+            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "P Teste", Destino = "D Teste", Valor = valorPacote, DataInicio = DateTime.Now, DataFim = DateTime.Now.AddDays(1) });
+
+            var userPassword = "PasswordValida123";
+            var userDto = new RegistroUsuarioDto
+            {
+                Nome = $"Cliente Reserva {Guid.NewGuid()}",
+                Email = $"cliente.reserva.{Guid.NewGuid()}@teste.com",
+                Senha = userPassword,
+                Documento = new Random().NextInt64(10000000000, 99999999999).ToString(),
+                Telefone = "11999999999"
+            };
+            await RegisterAndConfirmUserAsync(userDto);
+
+            await LoginAndSetAuthTokenAsync(userDto.Email, userDto.Senha);
+
+            var reservaDto = new CriarReservaDto { PacoteViagemId = pacoteId };
+            var response = await _client.PostAsJsonAsync("/api/Reserva", reservaDto);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var reservaId = body.GetProperty("id").GetInt32();
+
+            return (reservaId, valorPacote, userDto.Email, userDto.Senha);
+        }
+
+        protected async Task<(int usuarioId, int pacoteId, int reservaId, string userEmail, string userPassword)> CreateValidScenarioForReviewAsync(TimeSpan? travelEndDateOffset = null)
+        {
+            // Define a data de fim da viagem. Padrão: ontem.
+            var travelEndDate = DateTime.UtcNow + (travelEndDateOffset ?? TimeSpan.FromDays(-1));
+
+            var userPassword = "PasswordValida123";
+            var userDto = new RegistroUsuarioDto
+            {
+                Nome = $"Cliente Avaliador {Guid.NewGuid()}",
+                Email = $"avaliador.{Guid.NewGuid()}@teste.com",
+                Senha = userPassword,
+                Documento = new Random().NextInt64(10000000000, 99999999999).ToString(),
+                Telefone = "11988887777"
+            };
+            await RegisterAndConfirmUserAsync(userDto);
+            var usuarioId = (await GetUserIdByEmail(userDto.Email)).Value;
+
+            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "P Teste", Destino = "D Teste", Valor = 100, DataInicio = DateTime.UtcNow.AddDays(-10), DataFim = travelEndDate });
+
+            await LoginAndSetAuthTokenAsync(userDto.Email, userDto.Senha);
+
+            var reservaDto = new CriarReservaDto { PacoteViagemId = pacoteId };
+            var reservaResponse = await _client.PostAsJsonAsync("/api/Reserva", reservaDto);
+            reservaResponse.EnsureSuccessStatusCode();
+            var reservaBody = await reservaResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var reservaId = reservaBody.GetProperty("id").GetInt32();
+
+            // Simula a confirmação da reserva por um admin
+            using (var scope = _factory.Server.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<DecoleiDbContext>();
+                var reserva = await dbContext.Reservas.FindAsync(reservaId);
+                reserva.Status = "CONFIRMADO";
+                await dbContext.SaveChangesAsync();
+            }
+
+            return (usuarioId, pacoteId, reservaId, userDto.Email, userDto.Senha);
         }
     }
 }
