@@ -168,5 +168,72 @@ namespace Decolei.net.Tests.Testes
 
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
+
+        [Fact]
+        [Trait("Integration", "Reservas - Lógica de Valor")]
+        public async Task Rsv10_CriarReserva_SemViajantes_ValorTotalDeveSerIgualAoPacote()
+        {
+            decimal valorDoPacote = 1250.50m;
+            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "Sozinho", Destino = "Ilha", Valor = valorDoPacote, DataInicio = DateTime.Now, DataFim = DateTime.Now.AddDays(1) });
+            var clienteDto = new RegistroUsuarioDto { Nome = "Viajante Solitário", Email = "solitario@teste.com", Senha = "SenhaValida123", Documento = "13131313131", Telefone = "13131313131" };
+            await RegisterAndConfirmUserAsync(clienteDto);
+            await LoginAndSetAuthTokenAsync(clienteDto.Email, clienteDto.Senha);
+
+            var reservaDto = new CriarReservaDto
+            {
+                PacoteViagemId = pacoteId,
+                Viajantes = new List<ViajanteDto>()
+            };
+
+            var response = await _client.PostAsJsonAsync("/api/Reserva", reservaDto);
+
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(valorDoPacote, body.GetProperty("valorTotal").GetDecimal());
+        }
+
+        [Fact]
+        [Trait("Integration", "Reservas - Lógica de Valor")]
+        public async Task Rsv11_CriarReserva_ComViajantes_ValorTotalDeveSerMultiplicado()
+        {
+            decimal valorDoPacote = 1000m;
+            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "Em Grupo", Destino = "Excursão", Valor = valorDoPacote, DataInicio = DateTime.Now, DataFim = DateTime.Now.AddDays(1) });
+            var clienteDto = new RegistroUsuarioDto { Nome = "Organizador", Email = "organizador@teste.com", Senha = "SenhaValida123", Documento = "14141414141", Telefone = "14141414141" };
+            await RegisterAndConfirmUserAsync(clienteDto);
+            await LoginAndSetAuthTokenAsync(clienteDto.Email, clienteDto.Senha);
+
+            var viajantes = new List<ViajanteDto>
+            {
+                new ViajanteDto { Nome = "Amigo 1", Documento = "A1" },
+                new ViajanteDto { Nome = "Amigo 2", Documento = "A2" }
+            };
+
+            decimal valorEsperado = valorDoPacote * (1 + viajantes.Count); // 1000 * 3 = 3000
+
+            var reservaDto = new CriarReservaDto
+            {
+                PacoteViagemId = pacoteId,
+                Viajantes = viajantes
+            };
+
+            var response = await _client.PostAsJsonAsync("/api/Reserva", reservaDto);
+
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(valorEsperado, body.GetProperty("valorTotal").GetDecimal());
+        }
+
+        [Fact]
+        [Trait("Integration", "Reservas - Segurança")]
+        public async Task Rsv12_CriarReserva_SemAutenticacao_DeveRetornarUnauthorized()
+        {
+            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "P10", Destino = "D10", Valor = 100, DataInicio = DateTime.Now, DataFim = DateTime.Now.AddDays(1) });
+            _client.DefaultRequestHeaders.Authorization = null; // Garante que não está logado
+
+            var response = await _client.PostAsJsonAsync("/api/Reserva", new CriarReservaDto { PacoteViagemId = pacoteId });
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
     }
 }
