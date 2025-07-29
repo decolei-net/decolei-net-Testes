@@ -16,7 +16,7 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_01_CriarPagamento_ComDadosValidos_DeveRetornarOk()
         {
-            var (reservaId, _, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
 
             var pagamentoDto = new
@@ -25,7 +25,7 @@ namespace Decolei.net.Tests.Testes
                 NomeCompleto = "Cliente Teste Válido",
                 Cpf = "12345678901",
                 Metodo = "CREDITO",
-                Valor = 100.00m,
+                Valor = valorPacote,
                 Parcelas = 1,
                 NumeroCartao = "1111222233334444",
                 Email = userEmail
@@ -41,7 +41,7 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_02_CriarPagamento_ParaReservaJaPaga_DeveRetornarBadRequest()
         {
-            var (reservaId, _, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
             var pagamentoDto = new
             {
@@ -49,14 +49,12 @@ namespace Decolei.net.Tests.Testes
                 NomeCompleto = "C Teste",
                 Cpf = "12345678901",
                 Metodo = "PIX",
-                Valor = 100.00m,
+                Valor = valorPacote,
                 Email = userEmail
             };
 
             await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
-
             var response = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
-
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
@@ -64,8 +62,7 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_03_CriarPagamento_ComoNaoDonoDaReserva_DeveRetornarBadRequest()
         {
-            var (reservaId, _, _, _) = await CreatePackageAndReservationAsync();
-
+            var (reservaId, valorPacote, _, _) = await CreatePackageAndReservationAsync();
             var outroClienteDto = new RegistroUsuarioDto { Nome = "Invasor", Email = "invasor@teste.com", Senha = "senha123", Documento = "98765432109", Telefone = "111" };
             await RegisterAndConfirmUserAsync(outroClienteDto);
             await LoginAndSetAuthTokenAsync(outroClienteDto.Email, outroClienteDto.Senha);
@@ -76,12 +73,11 @@ namespace Decolei.net.Tests.Testes
                 NomeCompleto = "Tentativa Indevida",
                 Cpf = "09876543210",
                 Metodo = "DEBITO",
-                Valor = 100.00m,
+                Valor = valorPacote,
                 Email = outroClienteDto.Email
             };
 
             var response = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
-
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
@@ -89,7 +85,7 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_04_ObterStatus_ComoAdmin_DeveRetornarOk()
         {
-            var (reservaId, _, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
             var pagamentoDto = new
             {
@@ -97,17 +93,17 @@ namespace Decolei.net.Tests.Testes
                 NomeCompleto = "C Teste",
                 Cpf = "12345678901",
                 Metodo = "PIX",
-                Valor = 100.00m,
+                Valor = valorPacote,
                 Email = userEmail
             };
             var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            pagResponse.EnsureSuccessStatusCode();
             var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
             await EnsureAdminUserExistsAsync();
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
 
             var response = await _client.GetAsync($"/pagamentos/status/{pagamentoId}");
-
             response.EnsureSuccessStatusCode();
         }
 
@@ -115,7 +111,7 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_05_ObterStatus_ComoCliente_DeveRetornarForbidden()
         {
-            var (reservaId, _, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
             var pagamentoDto = new
             {
@@ -123,14 +119,14 @@ namespace Decolei.net.Tests.Testes
                 NomeCompleto = "C Teste",
                 Cpf = "12345678901",
                 Metodo = "PIX",
-                Valor = 100.00m,
+                Valor = valorPacote,
                 Email = userEmail
             };
             var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            pagResponse.EnsureSuccessStatusCode();
             var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
             var response = await _client.GetAsync($"/pagamentos/status/{pagamentoId}");
-
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
 
@@ -138,18 +134,19 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_06_AtualizarStatus_ComoAdmin_DeveRetornarOk()
         {
-            var (reservaId, _, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
             var pagamentoDto = new
             {
                 ReservaId = reservaId,
                 NomeCompleto = "C Teste",
                 Cpf = "12345678901",
-                Metodo = "PIX",
-                Valor = 100.00m,
+                Metodo = "PIX", 
+                Valor = valorPacote,
                 Email = userEmail
             };
             var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            pagResponse.EnsureSuccessStatusCode();
             var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
             await EnsureAdminUserExistsAsync();
@@ -158,7 +155,6 @@ namespace Decolei.net.Tests.Testes
             var statusUpdateDto = new { Status = "APROVADO" };
 
             var response = await _client.PutAsJsonAsync($"/pagamentos/{pagamentoId}", statusUpdateDto);
-
             response.EnsureSuccessStatusCode();
         }
 
@@ -166,7 +162,7 @@ namespace Decolei.net.Tests.Testes
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_07_AtualizarStatus_ComoCliente_DeveRetornarForbidden()
         {
-            var (reservaId, _, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
             var pagamentoDto = new
             {
@@ -174,16 +170,16 @@ namespace Decolei.net.Tests.Testes
                 NomeCompleto = "C Teste",
                 Cpf = "12345678901",
                 Metodo = "PIX",
-                Valor = 100.00m,
+                Valor = valorPacote,
                 Email = userEmail
             };
             var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            pagResponse.EnsureSuccessStatusCode();
             var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
             var statusUpdateDto = new { Status = "APROVADO" };
 
             var response = await _client.PutAsJsonAsync($"/pagamentos/{pagamentoId}", statusUpdateDto);
-
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
     }
