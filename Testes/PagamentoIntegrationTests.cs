@@ -1,4 +1,5 @@
 ﻿using Decolei.net.DTOs;
+using Decolei.net.Enums;
 using Decolei.net.Tests;
 using System.Net;
 using System.Net.Http.Json;
@@ -14,27 +15,29 @@ namespace Decolei.net.Tests.Testes
 
         [Fact]
         [Trait("Integration", "Pagamentos")]
-        public async Task Pag_01_CriarPagamento_ComDadosValidos_DeveRetornarOk()
+        public async Task Pag_01_CriarPagamento_ComDadosValidos_DeveRetornarOkEStatusAprovado()
         {
             var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
 
-            var pagamentoDto = new
+            var pagamentoDto = new PagamentoEntradaDTO
             {
                 ReservaId = reservaId,
                 NomeCompleto = "Cliente Teste Válido",
                 Cpf = "12345678901",
-                Metodo = "CREDITO",
+                Metodo = MetodoPagamento.Credito,
                 Valor = valorPacote,
                 Parcelas = 1,
                 NumeroCartao = "1111222233334444",
                 Email = userEmail
             };
 
-            var response = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            var response = await _client.PostAsJsonAsync("/api/Pagamentos", pagamentoDto);
 
             response.EnsureSuccessStatusCode();
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<PagamentoDto>();
+            Assert.NotNull(result);
+            Assert.Equal("APROVADO", result.Status);
         }
 
         [Fact]
@@ -43,42 +46,51 @@ namespace Decolei.net.Tests.Testes
         {
             var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            var pagamentoDto = new
+            var pagamentoDto = new PagamentoEntradaDTO
             {
                 ReservaId = reservaId,
                 NomeCompleto = "C Teste",
                 Cpf = "12345678901",
-                Metodo = "PIX",
+                Metodo = MetodoPagamento.Pix,
                 Valor = valorPacote,
                 Email = userEmail
             };
 
-            await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
-            var response = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            await _client.PostAsJsonAsync("/api/Pagamentos", pagamentoDto);
+
+            var response = await _client.PostAsJsonAsync("/api/Pagamentos", pagamentoDto);
+
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var errorBody = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Esta reserva já possui um pagamento aprovado.", errorBody.GetProperty("erro").GetString());
         }
 
         [Fact]
         [Trait("Integration", "Pagamentos")]
         public async Task Pag_03_CriarPagamento_ComoNaoDonoDaReserva_DeveRetornarBadRequest()
         {
+            // ARRANGE
             var (reservaId, valorPacote, _, _) = await CreatePackageAndReservationAsync();
             var outroClienteDto = new RegistroUsuarioDto { Nome = "Invasor", Email = "invasor@teste.com", Senha = "senha123", Documento = "98765432109", Telefone = "111" };
             await RegisterAndConfirmUserAsync(outroClienteDto);
             await LoginAndSetAuthTokenAsync(outroClienteDto.Email, outroClienteDto.Senha);
 
-            var pagamentoDto = new
+            var pagamentoDto = new PagamentoEntradaDTO
             {
                 ReservaId = reservaId,
                 NomeCompleto = "Tentativa Indevida",
                 Cpf = "09876543210",
-                Metodo = "DEBITO",
+                Metodo = MetodoPagamento.Debito,
                 Valor = valorPacote,
-                Email = outroClienteDto.Email
+                Email = outroClienteDto.Email,
+                NumeroCartao = "5555666677778888"
             };
 
-            var response = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            var response = await _client.PostAsJsonAsync("/api/Pagamentos", pagamentoDto);
+
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var errorBody = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Você não tem permissão para pagar por esta reserva.", errorBody.GetProperty("erro").GetString());
         }
 
         [Fact]
@@ -87,24 +99,17 @@ namespace Decolei.net.Tests.Testes
         {
             var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            var pagamentoDto = new
-            {
-                ReservaId = reservaId,
-                NomeCompleto = "C Teste",
-                Cpf = "12345678901",
-                Metodo = "PIX",
-                Valor = valorPacote,
-                Email = userEmail
-            };
-            var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            var pagResponse = await _client.PostAsJsonAsync("/api/Pagamentos", new PagamentoEntradaDTO { ReservaId = reservaId, NomeCompleto = "N", Cpf = "1", Metodo = MetodoPagamento.Pix, Valor = valorPacote, Email = userEmail });
             pagResponse.EnsureSuccessStatusCode();
-            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+            var pagamentoCriado = await pagResponse.Content.ReadFromJsonAsync<PagamentoDto>();
+            var pagamentoId = pagamentoCriado.Id;
 
-            await EnsureAdminUserExistsAsync();
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
+            var response = await _client.GetAsync($"/api/Pagamentos/status/{pagamentoId}");
 
-            var response = await _client.GetAsync($"/pagamentos/status/{pagamentoId}");
             response.EnsureSuccessStatusCode();
+            var statusResult = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("APROVADO", statusResult.GetProperty("statusPagamento").GetString());
         }
 
         [Fact]
@@ -113,49 +118,48 @@ namespace Decolei.net.Tests.Testes
         {
             var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            var pagamentoDto = new
-            {
-                ReservaId = reservaId,
-                NomeCompleto = "C Teste",
-                Cpf = "12345678901",
-                Metodo = "PIX",
-                Valor = valorPacote,
-                Email = userEmail
-            };
-            var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            var pagResponse = await _client.PostAsJsonAsync("/api/Pagamentos", new PagamentoEntradaDTO { ReservaId = reservaId, NomeCompleto = "N", Cpf = "1", Metodo = MetodoPagamento.Pix, Valor = valorPacote, Email = userEmail });
             pagResponse.EnsureSuccessStatusCode();
-            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<PagamentoDto>()).Id;
 
-            var response = await _client.GetAsync($"/pagamentos/status/{pagamentoId}");
+            var response = await _client.GetAsync($"/api/Pagamentos/status/{pagamentoId}");
+
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
 
         [Fact]
         [Trait("Integration", "Pagamentos")]
-        public async Task Pag_06_AtualizarStatus_ComoAdmin_DeveRetornarOk()
+        public async Task Pag_06_AtualizarStatus_ComoAdmin_DeveRetornarOkEAtualizarStatus()
         {
             var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            var pagamentoDto = new
+
+            var pagamentoInicialDto = new PagamentoEntradaDTO
             {
                 ReservaId = reservaId,
-                NomeCompleto = "C Teste",
-                Cpf = "12345678901",
-                Metodo = "PIX", 
+                NomeCompleto = "Cliente Para Atualizar",
+                Cpf = "11122233344",
+                Metodo = MetodoPagamento.Pix,
                 Valor = valorPacote,
                 Email = userEmail
             };
-            var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
+            var pagResponse = await _client.PostAsJsonAsync("/api/Pagamentos", pagamentoInicialDto);
             pagResponse.EnsureSuccessStatusCode();
-            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<PagamentoDto>()).Id;
 
-            await EnsureAdminUserExistsAsync();
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
 
-            var statusUpdateDto = new { Status = "APROVADO" };
+            var statusUpdateDto = new AtualizarStatusPagamentoDto { Status = "RECUSADO" };
 
-            var response = await _client.PutAsJsonAsync($"/pagamentos/{pagamentoId}", statusUpdateDto);
+            var response = await _client.PutAsJsonAsync($"/api/Pagamentos/{pagamentoId}", statusUpdateDto);
+
             response.EnsureSuccessStatusCode();
+
+            var statusResponse = await _client.GetAsync($"/api/Pagamentos/status/{pagamentoId}");
+            statusResponse.EnsureSuccessStatusCode();
+            var statusResult = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+            Assert.Equal("RECUSADO", statusResult.GetProperty("statusPagamento").GetString());
         }
 
         [Fact]
@@ -164,23 +168,40 @@ namespace Decolei.net.Tests.Testes
         {
             var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            var pagamentoDto = new
+            var pagResponse = await _client.PostAsJsonAsync("/api/Pagamentos", new PagamentoEntradaDTO { ReservaId = reservaId, NomeCompleto = "N", Cpf = "1", Metodo = MetodoPagamento.Pix, Valor = valorPacote, Email = userEmail });
+            pagResponse.EnsureSuccessStatusCode();
+            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<PagamentoDto>()).Id;
+
+            var statusUpdateDto = new AtualizarStatusPagamentoDto { Status = "APROVADO" };
+
+            var response = await _client.PutAsJsonAsync($"/api/Pagamentos/{pagamentoId}", statusUpdateDto);
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
+        [Fact]
+        [Trait("Integration", "Pagamentos")]
+        public async Task Pag_08_CriarPagamento_ComBoleto_DeveRetornarStatusPendente()
+        {
+            var (reservaId, valorPacote, userEmail, userPassword) = await CreatePackageAndReservationAsync();
+            await LoginAndSetAuthTokenAsync(userEmail, userPassword);
+
+            var pagamentoDto = new PagamentoEntradaDTO
             {
                 ReservaId = reservaId,
-                NomeCompleto = "C Teste",
-                Cpf = "12345678901",
-                Metodo = "PIX",
+                NomeCompleto = "Cliente Boleto",
+                Cpf = "33322211100",
+                Metodo = MetodoPagamento.Boleto,
                 Valor = valorPacote,
                 Email = userEmail
             };
-            var pagResponse = await _client.PostAsJsonAsync("/pagamentos", pagamentoDto);
-            pagResponse.EnsureSuccessStatusCode();
-            var pagamentoId = (await pagResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
-            var statusUpdateDto = new { Status = "APROVADO" };
+            var response = await _client.PostAsJsonAsync("/api/Pagamentos", pagamentoDto);
 
-            var response = await _client.PutAsJsonAsync($"/pagamentos/{pagamentoId}", statusUpdateDto);
-            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<PagamentoDto>();
+            Assert.NotNull(result);
+            Assert.Equal("PENDENTE", result.Status);
         }
     }
 }

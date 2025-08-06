@@ -1,5 +1,7 @@
-﻿using Decolei.net.DTOs;
+﻿using Decolei.net.Data;
+using Decolei.net.DTOs;
 using Decolei.net.Tests;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -135,22 +137,28 @@ namespace Decolei.net.Tests.Testes
         }
 
         [Fact]
-        [Trait("Integration", "Reservas")]
+        [Trait("Integration", "Reservas - Admin")]
         public async Task Rsv08_AtualizarStatus_ComoAdmin_DeveRetornarNoContent()
         {
-            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "P6", Destino = "D6", Valor = 1, DataInicio = DateTime.Now, DataFim = DateTime.Now.AddDays(1) });
-            var clienteDto = new RegistroUsuarioDto { Nome = "Cliente Teste", Email = "clienteteste@teste.com", Senha = "senha123", Documento = "10101010101", Telefone = "10101010101" };
-            await RegisterAndConfirmUserAsync(clienteDto);
-            await LoginAndSetAuthTokenAsync(clienteDto.Email, clienteDto.Senha);
-            var reservaResponse = await _client.PostAsJsonAsync("/api/Reserva", new CriarReservaDto { PacoteViagemId = pacoteId });
-            var reservaId = (await reservaResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+            var (reservaId, _, _, _) = await CreatePackageAndReservationAsync();
 
             await EnsureAdminUserExistsAsync();
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
 
-            var response = await _client.PutAsJsonAsync($"/api/Reserva/{reservaId}", new UpdateReservaDto { Status = "CONFIRMADA" });
+            var updateDto = new UpdateReservaDto { Status = "APROVADO" };
 
+            var response = await _client.PutAsJsonAsync($"/api/Reserva/{reservaId}", updateDto);
+
+            response.EnsureSuccessStatusCode(); // Garante que não é 4xx ou 5xx
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+            using (var scope = _factory.Server.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<DecoleiDbContext>();
+                var reservaAtualizada = await dbContext.Reservas.FindAsync(reservaId);
+                Assert.NotNull(reservaAtualizada);
+                Assert.Equal("APROVADO", reservaAtualizada.Status);
+            }
         }
 
         [Fact]
