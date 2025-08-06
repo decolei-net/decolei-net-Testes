@@ -11,173 +11,217 @@ namespace Decolei.net.Tests.Testes
     {
         public AvaliacaoIntegrationTests() : base() { }
 
-        // Teste para o cenário de sucesso ao criar uma avaliação.
         [Fact]
         [Trait("Integration", "Avaliações")]
-        public async Task Avl01_AvaliarPacote_ComDadosValidos_DeveRetornarOk()
+        public async Task Avl01_AvaliarPacote_ComReservaConfirmada_DeveRetornarOk()
         {
-            // ARRANGE: Cria um cenário completo: usuário, pacote, e uma reserva CONFIRMADA que já terminou.
-            var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync();
+            var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync(statusReserva: "CONFIRMADA");
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
 
-            var avaliacaoRequest = new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5, Comentario = "Viagem incrível!" };
+            var avaliacaoRequest = new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5, Comentario = "Viagem incrível!" };
 
-            // ACT: Envia a requisição para avaliar o pacote.
-            var response = await _client.PostAsJsonAsync("/avaliacoes", avaliacaoRequest);
+            var response = await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
 
-            // ASSERT: Verifica se a operação foi bem-sucedida.
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("Avaliação registrada com sucesso.", body.GetProperty("message").GetString());
         }
 
-        // Testa se o controller rejeita notas fora do intervalo permitido (1-5).
         [Theory]
         [Trait("Integration", "Avaliações")]
-        [InlineData(0)]
-        [InlineData(6)]
-        public async Task Avl02_AvaliarPacote_ComNotaInvalida_DeveRetornarBadRequest(int notaInvalida)
+        [InlineData(0, "Nota deve estar entre 1 e 5.")]
+        [InlineData(6, "Nota deve estar entre 1 e 5.")]
+        public async Task Avl02_AvaliarPacote_ComNotaInvalida_DeveRetornarBadRequestComMensagemCorreta(int notaInvalida, string mensagemEsperada)
         {
-            // ARRANGE
             var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
 
-            var avaliacaoRequest = new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = notaInvalida };
+            var avaliacaoRequest = new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = notaInvalida };
 
-            // ACT
-            var response = await _client.PostAsJsonAsync("/avaliacoes", avaliacaoRequest);
+            var response = await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
 
-            // ASSERT
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Equal(mensagemEsperada, body);
         }
 
-        // Testa a regra de negócio que só permite avaliar após o fim da data da viagem.
         [Fact]
         [Trait("Integration", "Avaliações")]
-        public async Task Avl03_AvaliarPacote_AntesDoFimDaViagem_DeveRetornarBadRequest()
+        public async Task Avl03_AvaliarPacote_AntesDoFimDaViagem_DeveRetornarBadRequestComMensagemCorreta()
         {
-            // ARRANGE: Cria um cenário onde a viagem só termina daqui a 10 dias.
             var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync(TimeSpan.FromDays(10));
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
 
-            var avaliacaoRequest = new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5 };
+            var avaliacaoRequest = new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5 };
 
-            // ACT
-            var response = await _client.PostAsJsonAsync("/avaliacoes", avaliacaoRequest);
+            var response = await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
 
-            // ASSERT
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Equal("Você só pode avaliar esse pacote após o término da viagem.", body);
         }
 
-        // Testa a validação que impede um usuário de avaliar o mesmo pacote duas vezes.
         [Fact]
         [Trait("Integration", "Avaliações")]
-        public async Task Avl04_AvaliarPacote_DuasVezes_DeveRetornarBadRequest()
+        public async Task Avl04_AvaliarPacote_DuasVezes_DeveRetornarBadRequestComMensagemCorreta()
         {
-            // ARRANGE
             var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            var avaliacaoRequest = new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5 };
+            var avaliacaoRequest = new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5 };
 
-            // ACT: Faz a primeira avaliação (que deve funcionar) e a segunda (que deve falhar).
-            await _client.PostAsJsonAsync("/avaliacoes", avaliacaoRequest);
-            var response = await _client.PostAsJsonAsync("/avaliacoes", avaliacaoRequest);
+            await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
+            var response = await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
 
-            // ASSERT
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+           
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Equal("Você já avaliou este pacote anteriormente.", body);
         }
 
-        // Testa se o usuário precisa ter uma reserva confirmada para poder avaliar.
-        [Fact]
+        [Theory]
         [Trait("Integration", "Avaliações")]
-        public async Task Avl05_AvaliarPacote_SemReservaConfirmada_DeveRetornarBadRequest()
+        [InlineData("PENDENTE")] 
+        [InlineData("CANCELADA")] 
+        [InlineData(null)]      
+        public async Task Avl05_AvaliarPacote_ComReservaInvalidaOuInexistente_DeveRetornarBadRequest(string statusReserva)
         {
-            // ARRANGE: Cria um usuário e um pacote, mas não cria uma reserva.
-            var userDto = new RegistroUsuarioDto { Nome = "Avaliador Sem Reserva", Email = "semreserva@teste.com", Senha = "senha123", Documento = "12312312312" };
-            await RegisterAndConfirmUserAsync(userDto);
-            var userId = (await GetUserIdByEmail(userDto.Email)).Value;
+            var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync(statusReserva: statusReserva, criarReserva: statusReserva != null);
+            await LoginAndSetAuthTokenAsync(userEmail, userPassword);
+            var avaliacaoRequest = new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 4 };
 
-            var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "P", Destino = "D", Valor = 1, DataInicio = DateTime.UtcNow.AddDays(-2), DataFim = DateTime.UtcNow.AddDays(-1) });
-            await LoginAndSetAuthTokenAsync(userDto.Email, userDto.Senha);
-            var avaliacaoRequest = new { Usuario_Id = userId, PacoteViagem_Id = pacoteId, Nota = 4 };
+            var response = await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
 
-            // ACT
-            var response = await _client.PostAsJsonAsync("/avaliacoes", avaliacaoRequest);
-
-            // ASSERT
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Você só pode avaliar pacotes com reservas confirmadas ou concluídas.", body.GetProperty("erro").GetString());
         }
 
-        // Testa se o admin consegue ver a lista de avaliações pendentes.
         [Fact]
         [Trait("Integration", "Avaliações - Admin")]
         public async Task Avl06_ListarAvaliacoesPendentes_ComoAdmin_DeveRetornarLista()
         {
-            // ARRANGE: Cria uma avaliação, que por padrão fica pendente.
             var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            await _client.PostAsJsonAsync("/avaliacoes", new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 3 });
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 3 });
 
-            // ACT: Loga como admin e busca as avaliações pendentes.
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
-            var response = await _client.GetAsync("/avaliacoes/pendentes");
+            var response = await _client.GetAsync("/api/avaliacoes/pendentes");
 
-            // ASSERT
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
             Assert.NotEmpty(body);
+            Assert.Equal(pacoteId, body.First().GetProperty("pacoteId").GetInt32());
         }
 
-        // Testa o fluxo completo de aprovação de uma avaliação por um admin.
         [Fact]
         [Trait("Integration", "Avaliações - Admin")]
         public async Task Avl07_AprovarAvaliacao_ComoAdmin_DeveFuncionar()
         {
-            // ARRANGE: Cria uma avaliação pendente.
             var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            await _client.PostAsJsonAsync("/avaliacoes", new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5 });
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 5 });
 
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
-
-            // Pega o ID da avaliação que acabou de ser criada.
-            var pendentes = await (await _client.GetAsync("/avaliacoes/pendentes")).Content.ReadFromJsonAsync<List<JsonElement>>();
+            var pendentes = await (await _client.GetAsync("/api/avaliacoes/pendentes")).Content.ReadFromJsonAsync<List<JsonElement>>();
             var avaliacaoId = pendentes.First().GetProperty("id").GetInt32();
 
-            // ACT: Aprova a avaliação.
-            var acaoDto = new { Acao = "aprovar" };
-            var response = await _client.PutAsJsonAsync($"/avaliacoes/{avaliacaoId}", acaoDto);
+            var acaoDto = new AvaliacaoAcaoDto { Acao = "aprovar" };
+            var response = await _client.PutAsJsonAsync($"/api/avaliacoes/{avaliacaoId}", acaoDto);
             response.EnsureSuccessStatusCode();
 
-            // ASSERT: Verifica se a avaliação agora aparece na lista pública do pacote.
-            _client.DefaultRequestHeaders.Authorization = null; // Desloga para testar como usuário público.
-            var avaliacoesAprovadasResponse = await _client.GetAsync($"/avaliacoes/pacote/{pacoteId}");
+            _client.DefaultRequestHeaders.Authorization = null; 
+            var avaliacoesAprovadasResponse = await _client.GetAsync($"/api/avaliacoes/pacote/{pacoteId}");
             var avaliacoesAprovadas = await avaliacoesAprovadasResponse.Content.ReadFromJsonAsync<List<JsonElement>>();
             Assert.Single(avaliacoesAprovadas);
+            Assert.Equal(avaliacaoId, avaliacoesAprovadas.First().GetProperty("id").GetInt32());
         }
 
-        // Testa o fluxo de rejeição e exclusão de uma avaliação por um admin.
         [Fact]
         [Trait("Integration", "Avaliações - Admin")]
         public async Task Avl08_RejeitarAvaliacao_ComoAdmin_DeveExcluir()
         {
-            // ARRANGE: Cria uma avaliação pendente.
             var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync();
             await LoginAndSetAuthTokenAsync(userEmail, userPassword);
-            await _client.PostAsJsonAsync("/avaliacoes", new { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 1 });
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 1 });
 
             await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
-            var pendentesAntes = await (await _client.GetAsync("/avaliacoes/pendentes")).Content.ReadFromJsonAsync<List<JsonElement>>();
+            var pendentesAntes = await (await _client.GetAsync("/api/avaliacoes/pendentes?destino=D Teste")).Content.ReadFromJsonAsync<List<JsonElement>>();
             var avaliacaoId = pendentesAntes.First().GetProperty("id").GetInt32();
 
-            // ACT: Rejeita (exclui) a avaliação.
-            var acaoDto = new { Acao = "rejeitar" };
-            var response = await _client.PutAsJsonAsync($"/avaliacoes/{avaliacaoId}", acaoDto);
+            var acaoDto = new AvaliacaoAcaoDto { Acao = "rejeitar" };
+            var response = await _client.PutAsJsonAsync($"/api/avaliacoes/{avaliacaoId}", acaoDto);
             response.EnsureSuccessStatusCode();
 
-            // ASSERT: Verifica se a lista de pendentes agora está vazia.
-            var pendentesDepois = await (await _client.GetAsync("/avaliacoes/pendentes")).Content.ReadFromJsonAsync<List<JsonElement>>();
-            Assert.Empty(pendentesDepois);
+            var pendentesDepois = await (await _client.GetAsync("/api/avaliacoes/pendentes?destino=D Teste")).Content.ReadFromJsonAsync<List<JsonElement>>();
+            Assert.DoesNotContain(pendentesDepois, p => p.GetProperty("id").GetInt32() == avaliacaoId);
+        }
+
+        [Fact]
+        [Trait("Integration", "Avaliações")]
+        public async Task Avl09_AvaliarPacote_ComReservaConcluida_DeveRetornarOk()
+        {
+            var (usuarioId, pacoteId, _, userEmail, userPassword) = await CreateValidScenarioForReviewAsync(statusReserva: "CONCLUIDA");
+            await LoginAndSetAuthTokenAsync(userEmail, userPassword);
+
+            var avaliacaoRequest = new AvaliacaoRequest { Usuario_Id = usuarioId, PacoteViagem_Id = pacoteId, Nota = 4, Comentario = "Viagem concluída com sucesso." };
+
+            var response = await _client.PostAsJsonAsync("/api/avaliacoes", avaliacaoRequest);
+
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Avaliação registrada com sucesso.", body.GetProperty("message").GetString());
+        }
+
+        [Fact]
+        [Trait("Integration", "Avaliações - Cliente")]
+        public async Task Avl10_GetMinhasAvaliacoes_ComoCliente_DeveRetornarApenasSuasAvaliacoes()
+        {
+            var (usuarioId1, pacoteId1, _, email1, pass1) = await CreateValidScenarioForReviewAsync();
+            await LoginAndSetAuthTokenAsync(email1, pass1);
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId1, PacoteViagem_Id = pacoteId1, Nota = 5, Comentario = "Avaliação do Cliente 1" });
+
+            var (usuarioId2, pacoteId2, _, email2, pass2) = await CreateValidScenarioForReviewAsync();
+            await LoginAndSetAuthTokenAsync(email2, pass2);
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId2, PacoteViagem_Id = pacoteId2, Nota = 3, Comentario = "Avaliação do Cliente 2" });
+
+            await LoginAndSetAuthTokenAsync(email1, pass1);
+            var response = await _client.GetAsync("/api/avaliacoes/minhas-avaliacoes");
+
+            response.EnsureSuccessStatusCode();
+            var minhasAvaliacoes = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
+
+            Assert.Single(minhasAvaliacoes); 
+            Assert.Equal("Avaliação do Cliente 1", minhasAvaliacoes.First().GetProperty("comentario").GetString());
+            Assert.Equal("PENDENTE", minhasAvaliacoes.First().GetProperty("status").GetString());
+            Assert.Equal(pacoteId1, minhasAvaliacoes.First().GetProperty("pacote").GetProperty("id").GetInt32());
+        }
+
+        [Fact]
+        [Trait("Integration", "Avaliações - Admin")]
+        public async Task Avl11_ListarAvaliacoesAprovadas_ComoAdmin_DeveRetornarApenasAprovadas()
+        {
+            var (usuarioId1, pacoteId1, _, email1, pass1) = await CreateValidScenarioForReviewAsync();
+            await LoginAndSetAuthTokenAsync(email1, pass1);
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId1, PacoteViagem_Id = pacoteId1, Nota = 5 }); // Esta será aprovada
+
+            var (usuarioId2, _, _, email2, pass2) = await CreateValidScenarioForReviewAsync();
+            await LoginAndSetAuthTokenAsync(email2, pass2);
+            await _client.PostAsJsonAsync("/api/avaliacoes", new AvaliacaoRequest { Usuario_Id = usuarioId2, PacoteViagem_Id = pacoteId1, Nota = 2 }); // Esta ficará pendente
+
+            // Aprova a primeira avaliação
+            await LoginAndSetAuthTokenAsync(AdminEmail, AdminPassword);
+            var pendentes = await (await _client.GetAsync("/api/avaliacoes/pendentes")).Content.ReadFromJsonAsync<List<JsonElement>>();
+            var avaliacaoParaAprovarId = pendentes.First(p => p.GetProperty("usuarioId").GetInt32() == usuarioId1).GetProperty("id").GetInt32();
+            await _client.PutAsJsonAsync($"/api/avaliacoes/{avaliacaoParaAprovarId}", new AvaliacaoAcaoDto { Acao = "aprovar" });
+
+            var response = await _client.GetAsync("/api/avaliacoes/aprovadas");
+
+            response.EnsureSuccessStatusCode();
+            var aprovadas = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
+            Assert.Single(aprovadas);
+            Assert.Equal(avaliacaoParaAprovarId, aprovadas.First().GetProperty("id").GetInt32());
         }
     }
 }
