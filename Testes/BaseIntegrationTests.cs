@@ -192,7 +192,8 @@ namespace Decolei.net.Tests.Testes
             return (reservaId, valorPacote, userDto.Email, userDto.Senha);
         }
 
-        protected async Task<(int usuarioId, int pacoteId, int reservaId, string userEmail, string userPassword)> CreateValidScenarioForReviewAsync(TimeSpan? travelEndDateOffset = null)
+        protected async Task<(int usuarioId, int pacoteId, int? reservaId, string userEmail, string userPassword)>
+        CreateValidScenarioForReviewAsync(TimeSpan? travelEndDateOffset = null, string statusReserva = "CONFIRMADA", bool criarReserva = true)
         {
             // Define a data de fim da viagem. Padrão: ontem.
             var travelEndDate = DateTime.UtcNow + (travelEndDateOffset ?? TimeSpan.FromDays(-1));
@@ -211,31 +212,28 @@ namespace Decolei.net.Tests.Testes
 
             var pacoteId = await CreatePackageAndGetIdAsync(new CriarPacoteViagemDto { Titulo = "P Teste", Destino = "D Teste", Valor = 100, DataInicio = DateTime.UtcNow.AddDays(-10), DataFim = travelEndDate });
 
-            await LoginAndSetAuthTokenAsync(userDto.Email, userDto.Senha);
-
-            var reservaDto = new CriarReservaDto { PacoteViagemId = pacoteId };
-            var reservaResponse = await _client.PostAsJsonAsync("/api/Reserva", reservaDto);
-            reservaResponse.EnsureSuccessStatusCode();
-            var reservaBody = await reservaResponse.Content.ReadFromJsonAsync<JsonElement>();
-            var reservaId = reservaBody.GetProperty("id").GetInt32();
-
-            // Simula a confirmação da reserva por um admin
-            using (var scope = _factory.Server.Services.CreateScope())
+            int? reservaId = null;
+            if (criarReserva)
             {
-                var dbContext = scope.ServiceProvider.GetRequiredService<DecoleiDbContext>();
-                var reserva = await dbContext.Reservas.FindAsync(reservaId);
+                await LoginAndSetAuthTokenAsync(userDto.Email, userDto.Senha);
 
-                // ===================================================================
-                // A CORREÇÃO ESTÁ AQUI
-                // ===================================================================
-                // O status foi alterado para "CONFIRMADA" (com A no final), para que
-                // `reserva.Status.ToLower()` resulte em "confirmada" e passe na validação do controller.
-                reserva.Status = "CONFIRMADA";
-                // ===================================================================
+                var reservaDto = new CriarReservaDto { PacoteViagemId = pacoteId };
+                var reservaResponse = await _client.PostAsJsonAsync("/api/Reserva", reservaDto);
+                reservaResponse.EnsureSuccessStatusCode();
+                var reservaBody = await reservaResponse.Content.ReadFromJsonAsync<JsonElement>();
+                reservaId = reservaBody.GetProperty("id").GetInt32();
 
-                await dbContext.SaveChangesAsync();
+                // Simula a alteração do status da reserva
+                using (var scope = _factory.Server.Services.CreateScope())
+                {
+                    var dbContext = scope.ServiceProvider.GetRequiredService<DecoleiDbContext>();
+                    var reserva = await dbContext.Reservas.FindAsync(reservaId.Value);
+                    reserva.Status = statusReserva; // Usa o status passado como parâmetro
+                    await dbContext.SaveChangesAsync();
+                }
             }
 
+            // Retorna nullable reservaId
             return (usuarioId, pacoteId, reservaId, userDto.Email, userDto.Senha);
         }
     }
